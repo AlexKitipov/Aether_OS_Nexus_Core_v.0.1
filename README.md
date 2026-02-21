@@ -239,4 +239,213 @@ AetherOS is an ambitious open-source project, and we welcome contributions from 
 *   **Code of Conduct**: We adhere to a strict Code of Conduct to ensure a welcoming and inclusive community. Please read it before engaging with the project.
 *   **Contact**: Join our Discord channel (link to be added) or open an issue on GitHub to ask questions, suggest ideas, or report bugs.
 
-**Join the Aether. Build the Nexus.**
+**Join the Aether. Build the Nexus**
+
+=================================================================================================================
+
+📘 AetherOS Nexus — Core Documentation (v0.1.0)
+A clear, structured, and professional overview of the current system architecture.
+
+1. Overview
+AetherOS Nexus is a modular hybrid‑microkernel operating environment built around V‑Nodes — isolated, capability‑restricted system services that communicate through IPC channels and kernel syscalls.
+
+Version v0.1.0 currently includes:
+
+a minimal kernel with syscall dispatcher
+
+IPC messaging system
+
+IRQ routing to V‑Nodes
+
+DMA buffer allocation API (stub)
+
+the first system driver: net‑bridge V‑Node
+
+capability‑based security model
+
+YAML‑based V‑Node declaration format
+
+This version establishes the foundation for a future OS ecosystem.
+
+2. Architecture
+2.1 Kernel Components
+Syscall Dispatcher
+The kernel currently supports:
+
+Syscall	Description
+SYS_LOG	Writes V‑Node logs to the kernel console
+SYS_IPC_SEND	Sends IPC messages to a channel
+SYS_IPC_RECV	Receives IPC messages
+SYS_BLOCK_ON_CHAN	Blocks the current task on a channel
+SYS_TIME	Reads kernel timer ticks
+SYS_IRQ_REGISTER	Registers an IRQ to a V‑Node channel
+SYS_NET_RX_POLL	Polls for incoming network packets (stub)
+Capabilities
+The kernel enforces access control via:
+
+LogWrite
+
+TimeRead
+
+NetworkAccess
+
+StorageAccess
+
+Future capabilities will include PCI I/O, DMA, IRQ, MMIO, and raw syscalls.
+
+3. IPC System
+V‑Nodes communicate through channels identified by u32 IDs.
+
+The kernel can:
+
+deliver IRQ events to channels
+
+block tasks waiting on channels
+
+copy message buffers between V‑Nodes
+
+This forms the backbone of the Nexus IPC architecture.
+
+4. IRQ Routing
+A V‑Node registers an IRQ using:
+
+Код
+syscall3(SYS_IRQ_REGISTER, irq_number, channel_id, 0)
+When the IRQ fires:
+
+The kernel sends an IPC event to the V‑Node’s channel
+
+The V‑Node wakes up
+
+It processes the event
+
+It acknowledges the IRQ (future syscall)
+
+This model cleanly separates hardware events from driver logic.
+
+5. DMA Buffers (Stub Implementation)
+V‑Nodes can request DMA‑compatible buffers via:
+
+SYS_NET_ALLOC_BUF
+
+SYS_NET_FREE_BUF
+
+The allocator is currently a stub, but the API is stable and ready for a real implementation.
+
+6. Net‑Bridge V‑Node
+6.1 Purpose
+net-bridge is the first system driver. It demonstrates:
+
+IRQ registration
+
+DMA buffer usage
+
+RX polling
+
+TX packet generation
+
+IPC‑based interrupt handling
+
+the V‑Node execution model
+
+It will later act as a bridge to the svc://aethernet service.
+
+6.2 Lifecycle
+Initialize IPC channel (ID = 2)
+
+Register IRQ 11 (VirtIO‑Net)
+
+Allocate RX DMA buffer
+
+Enter main loop:
+
+wait for IRQ
+
+poll for packets
+
+process RX
+
+send a test TX packet
+
+free TX buffer
+
+6.3 YAML Declaration
+The V‑Node requires:
+
+NetworkAccess capability
+
+PCI access to the VirtIO‑Net device
+
+DMA allocation
+
+IRQ 11
+
+strict isolation mode
+
+This ensures minimal and secure hardware access.
+
+7. Current Limitations
+SYS_NET_RX_POLL always returns 0 (no real packets yet)
+
+DMA allocator is stubbed
+
+No VirtIO‑Net queue handling
+
+IRQ ACK syscall incomplete
+
+No scheduler
+
+No memory manager
+
+These are expected for an early v0.1.0 kernel.
+
+8. Roadmap (v0.2.0 → v0.3.0)
+v0.2.0 Goals
+Real DMA allocator
+
+VirtIO‑Net RX/TX queue implementation
+
+IRQ ACK syscall
+
+Basic packet parsing (ARP, IPv4)
+
+v0.3.0 Goals
+AetherNet service
+
+Zero‑copy packet forwarding
+
+Multi‑interface support
+
+Basic routing logic
+
+9. Developer Notes
+The architecture is stable despite being early‑stage
+
+V‑Node model works as intended
+
+IRQ routing is functional
+
+IPC channels are operational
+
+Syscall layer is extendable
+
+net‑bridge is a solid template for future drivers
+
+10. Summary
+AetherOS Nexus v0.1.0 already provides:
+
+a functioning microkernel
+
+IPC
+
+IRQ routing
+
+DMA API
+
+the first network driver
+
+capability‑based security
+
+YAML‑based V‑Node definitions
+
+This is the foundation of a real operating system.
