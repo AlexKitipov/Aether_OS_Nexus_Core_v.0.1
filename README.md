@@ -449,3 +449,26 @@ capability‑based security
 YAML‑based V‑Node definitions
 
 This is the foundation of a real operating system.
+
+11. GitHub Sync (Local Workflow)
+To connect this local repository to GitHub and continue work from the current branch:
+
+```bash
+git remote add origin https://github.com/AlexKitipov/Aether_OS_Nexus_Core_v.0.1
+git branch -M work
+git push -u origin work
+```
+
+If `origin` already exists, only update the URL:
+
+```bash
+git remote set-url origin https://github.com/AlexKitipov/Aether_OS_Nexus_Core_v.0.1
+```
+
+Then continue with the normal cycle:
+
+```bash
+git add .
+git commit -m "<message>"
+git push
+```
