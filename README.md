@@ -225,6 +225,63 @@ Our journey is far from over. The next steps for AetherOS Nexus Core involve exp
 #### Nexus Core v0.2: Resource & Security Hardening
 
 *   **Virtual Memory Management (VMM)**: Implement full virtual address spaces for V-Nodes, enabling robust memory isolation (Ring 3 for V-Nodes, Ring 0 for Kernel).
+
+## 🔌 Socket API (`svc://socket-api`)
+
+The `socket-api` V-Node exposes a POSIX-like socket interface over IPC for applications in AetherOS. Instead of allowing direct access to the network stack, applications communicate with `svc://socket-api`, which forwards validated operations to `svc://aethernet-service`. This preserves isolation and the capability model.
+
+### IPC Types
+
+Defined in `src/ipc/socket_ipc.rs`:
+
+```rust
+pub type SocketFd = u32;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum SocketRequest {
+    Socket { domain: i32, ty: i32, protocol: i32 },
+    Bind { fd: SocketFd, addr: [u8; 4], port: u16 },
+    Listen { fd: SocketFd, backlog: i32 },
+    Accept { fd: SocketFd },
+    Connect { fd: SocketFd, addr: [u8; 4], port: u16 },
+    Send { fd: SocketFd, data: Vec<u8> },
+    Recv { fd: SocketFd, len: u32 },
+    Close { fd: SocketFd },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum SocketResponse {
+    Success(i32),
+    Data(Vec<u8>),
+    Error(i32, String),
+    Accepted { new_fd: SocketFd, remote_addr: [u8; 4], remote_port: u16 },
+}
+```
+
+### Semantics
+
+- `Socket { domain, ty, protocol }` creates a socket and returns `SocketResponse::Success(fd)`.
+- `Bind`, `Listen`, `Connect`, and `Close` return `SocketResponse::Success(0)` on success.
+- `Send` returns `SocketResponse::Success(bytes_sent)`.
+- `Recv` returns `SocketResponse::Data(Vec<u8>)`.
+- `Accept` returns `SocketResponse::Accepted { new_fd, remote_addr, remote_port }`.
+- Any failure returns `SocketResponse::Error(errno, message)`.
+
+### Common Values
+
+- `domain = 2` → `AF_INET` (IPv4)
+- `ty = 1` → `SOCK_STREAM` (TCP)
+- `ty = 2` → `SOCK_DGRAM` (UDP)
+- `protocol = 0` → default protocol for selected domain/type
+
+### Error Handling Guidance
+
+Clients should always handle `SocketResponse::Error(errno, message)` and branch on `errno` where needed. Common values include:
+
+- `-1`: generic error
+- `9`: bad file descriptor (`EBADF`-like)
+- `11`: operation would block (`EWOULDBLOCK`-like)
+- `100`: custom `socket-api` domain error
 *   **Page Fault Handling**: Implement a robust page fault handler to manage memory-on-demand and enforce memory access policies.
 *   **Dynamic Memory Allocation for V-Nodes**: Allow V-Nodes to request additional memory from the kernel at runtime via `SYS_ALLOC_MEM` syscalls.
 *   **Process Control Blocks (PCBs)**: Enhance task management with more detailed process information and state transitions.
