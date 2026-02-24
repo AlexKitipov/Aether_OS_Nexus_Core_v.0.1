@@ -111,6 +111,9 @@ The repository is structured as a Rust workspace:
 
 ```text
 nexus-core/
+├─ docs/
+│  └─ mail-service-vnode.md   # Mail/Messaging V-Node IPC and behavior reference
+│
 ├─ Cargo.toml
 ├─ src/                      # Common modules for kernel and user-space V-Nodes
 │  ├─ lib.rs
@@ -453,3 +456,103 @@ capability‑based security
 YAML‑based V‑Node definitions
 
 This is the foundation of a real operating system.
+
+## 🤖 Model Runtime V-Node (`svc://model-runtime`)
+
+The `model-runtime` V-Node is a dedicated service for running machine learning inference workloads inside AetherOS. It provides a secure, isolated, and resource-governed runtime that client V-Nodes can use through IPC without handling model lifecycle complexity directly.
+
+### IPC Contract
+
+The IPC contract is represented by `InferRequest` and `InferResponse` enums (intended for `src/ipc/model_runtime_ipc.rs`):
+
+```rust
+#[derive(Debug, Serialize, Deserialize)]
+pub enum InferRequest {
+    /// Request for image classification.
+    ImageClassification { model_id: String, image_data: Vec<u8> },
+    /// Request for text generation.
+    TextGeneration { model_id: String, prompt: String, max_tokens: u32 },
+    // Extend with additional tasks as needed.
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum InferResponse {
+    /// Result for image classification.
+    ImageClassificationResult { class_labels: Vec<String>, probabilities: Vec<f32> },
+    /// Result for text generation.
+    TextGenerationResult { generated_text: String },
+    /// Inference/runtime error.
+    Error { message: String },
+}
+```
+
+### Request Parameters
+
+* `model_id`: Logical model identifier (e.g., `image_classifier_v1`, `gpt-nano`).
+* `image_data`: Raw image bytes for image classification tasks.
+* `prompt`: Input text for generation tasks.
+* `max_tokens`: Upper bound for generated token count.
+
+### Response Variants
+
+* `ImageClassificationResult`: Predicted labels plus probability vector.
+* `TextGenerationResult`: Generated text output.
+* `Error`: Descriptive failure reason from loading, preprocessing, or inference execution.
+
+### Service Responsibilities
+
+1. **IPC Endpoint**: Accepts inference requests from other V-Nodes via `svc://model-runtime`.
+2. **Model Management**: Loads and caches models from trusted storage paths (for example, `/models` via `svc://vfs`) keyed by `model_id`.
+3. **Inference Execution**: Runs task-specific inference pipelines for image and text workloads.
+4. **Resource Governance**: Enforces configured memory/CPU budgets and adapts utilization to system pressure.
+5. **Error Reporting**: Returns structured `InferResponse::Error` messages for all recoverable faults.
+6. **Observability**: Exposes metrics such as `inference_requests_total`, `inference_latency_avg_ms`, and `gpu_utilization_percent`.
+
+### Client Usage Examples
+
+```rust
+// Image classification example
+let mut model_runtime_chan = VNodeChannel::new(11);
+let image_data = vec![0; 1024]; // Replace with real image bytes
+
+let request = InferRequest::ImageClassification {
+    model_id: String::from("image_classifier_v1"),
+    image_data,
+};
+
+match model_runtime_chan.send_and_recv::<InferRequest, InferResponse>(&request) {
+    Ok(InferResponse::ImageClassificationResult { class_labels, probabilities }) => {
+        log!("Image Classification Result:");
+        for (label, prob) in class_labels.iter().zip(probabilities.iter()) {
+            log!("- {}: {:.2}%", label, prob * 100.0);
+        }
+    }
+    Ok(InferResponse::Error { message }) => {
+        log!("Image classification error: {}", message);
+    }
+    _ => log!("Unexpected response from model runtime"),
+}
+```
+
+```rust
+// Text generation example
+let mut model_runtime_chan = VNodeChannel::new(11);
+
+let request = InferRequest::TextGeneration {
+    model_id: String::from("gpt-nano"),
+    prompt: String::from("The quick brown fox "),
+    max_tokens: 50,
+};
+
+match model_runtime_chan.send_and_recv::<InferRequest, InferResponse>(&request) {
+    Ok(InferResponse::TextGenerationResult { generated_text }) => {
+        log!("Generated Text: {}", generated_text);
+    }
+    Ok(InferResponse::Error { message }) => {
+        log!("Text generation error: {}", message);
+    }
+    _ => log!("Unexpected response from model runtime"),
+}
+```
+
+This V-Node design positions `model-runtime` as a reusable AI backend for all inference-capable components in the AetherOS ecosystem.
