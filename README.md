@@ -107,6 +107,9 @@ The repository is structured as a Rust workspace:
 
 ```text
 nexus-core/
+├─ docs/
+│  └─ mail-service-vnode.md   # Mail/Messaging V-Node IPC and behavior reference
+│
 ├─ Cargo.toml
 ├─ src/                      # Common modules for kernel and user-space V-Nodes
 │  ├─ lib.rs
