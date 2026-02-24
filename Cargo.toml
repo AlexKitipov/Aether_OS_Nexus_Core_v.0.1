@@ -1,0 +1,15 @@
+[package]
+name = "aetheros-net-bridge"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+common = { path = "../../common" }
+postcard = { version = "1.0", default-features = false, features = ["alloc"] }
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
