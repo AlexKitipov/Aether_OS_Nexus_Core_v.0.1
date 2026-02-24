@@ -449,3 +449,98 @@ capability‑based security
 YAML‑based V‑Node definitions
 
 This is the foundation of a real operating system.
+
+## Service Manager / Init V-Node (`svc://init-service`)
+
+### Overview
+
+The `init-service` V-Node acts as the system's service manager, similar to `systemd` or `init` in traditional operating systems, but within the AetherOS microkernel architecture. Its primary responsibilities include starting, stopping, restarting, and monitoring other V-Nodes based on configuration and IPC requests.
+
+### IPC Protocol
+
+Communication with `svc://init-service` happens through the IPC enums in `src/ipc/init_ipc.rs`.
+
+#### `InitRequest` (Client -> init-service)
+
+```rust
+#[derive(Debug, Serialize, Deserialize)]
+pub enum InitRequest {
+    /// Start a V-Node by its name.
+    ServiceStart { service_name: String },
+    /// Get the status of a V-Node.
+    ServiceStatus { service_name: String },
+    /// Restart a V-Node.
+    ServiceRestart { service_name: String },
+    /// Stop a V-Node.
+    ServiceStop { service_name: String },
+}
+```
+
+* `service_name`: Unique V-Node service name (for example `aethernet-service`, `socket-api`).
+
+#### `InitResponse` (init-service -> Client)
+
+```rust
+#[derive(Debug, Serialize, Deserialize)]
+pub enum InitResponse {
+    /// Indicates successful operation.
+    Success(String), // Success message
+    /// Returns the status of a V-Node.
+    Status { service_name: String, is_running: bool, pid: Option<u64> },
+    /// Indicates an error occurred.
+    Error(String), // Error message
+}
+```
+
+### Responsibilities
+
+1. **Request handling**: listens for `InitRequest` messages on its dedicated IPC channel.
+2. **Configuration management**: reads service definitions from `/etc/services`.
+3. **Lifecycle management**:
+   * start V-Nodes
+   * stop V-Nodes
+   * restart V-Nodes
+   * monitor V-Node health/status
+4. **State tracking**: keeps internal status for configured/running services including conceptual PID/handle.
+5. **Error reporting**: returns structured failures such as unknown services, already-running services, and launch/termination failures.
+
+### Usage Examples
+
+#### Start a Service
+
+```rust
+let mut init_service_chan = VNodeChannel::new(6);
+let request = InitRequest::ServiceStart {
+    service_name: String::from("aethernet-service"),
+};
+
+match init_service_chan.send_and_recv::<InitRequest, InitResponse>(&request) {
+    Ok(InitResponse::Success(msg)) => log!("Successfully started service: {}", msg),
+    Ok(InitResponse::Error(msg)) => log!("Failed to start service: {}", msg),
+    _ => log!("Unexpected response from Init Service"),
+}
+```
+
+#### Get Service Status
+
+```rust
+let mut init_service_chan = VNodeChannel::new(6);
+let request = InitRequest::ServiceStatus {
+    service_name: String::from("socket-api"),
+};
+
+match init_service_chan.send_and_recv::<InitRequest, InitResponse>(&request) {
+    Ok(InitResponse::Status {
+        service_name,
+        is_running,
+        pid,
+    }) => log!(
+        "Service {}: Running: {}, PID: {:?}",
+        service_name,
+        is_running,
+        pid
+    ),
+    Ok(InitResponse::Error(msg)) => log!("Failed to get service status: {}", msg),
+    _ => log!("Unexpected response from Init Service"),
+}
+```
