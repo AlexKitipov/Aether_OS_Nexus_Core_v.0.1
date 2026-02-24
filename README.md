@@ -449,3 +449,7 @@ capability‑based security
 YAML‑based V‑Node definitions
 
 This is the foundation of a real operating system.
+
+## VFS V-Node Documentation
+
+Detailed IPC contract and usage examples for `svc://vfs` are available at `docs/VFS_VNODE.md`.
