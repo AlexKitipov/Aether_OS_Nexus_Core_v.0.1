@@ -449,3 +449,7 @@ capability‑based security
 YAML‑based V‑Node definitions
 
 This is the foundation of a real operating system.
+
+## Additional V-Node Specs
+
+- [File Manager V-Node (`svc://file-manager`)](FILE_MANAGER_VNODE.md)
