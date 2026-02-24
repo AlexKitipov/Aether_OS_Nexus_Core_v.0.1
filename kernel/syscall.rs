@@ -17,6 +17,11 @@ pub const SYS_IRQ_ACK: u64 = 10;
 pub const SYS_GET_DMA_BUF_PTR: u64 = 11;
 pub const SYS_SET_DMA_BUF_LEN: u64 = 12;
 pub const SYS_IPC_RECV_NONBLOCKING: u64 = 13;
+const IPC_CHANNEL_COUNT: u32 = 32;
+
+fn is_valid_channel_id(id: u32) -> bool {
+    id < IPC_CHANNEL_COUNT
+}
 
 fn try_recv_into_buffer(channel_id: u32, out_ptr: *mut u8, out_cap: usize) -> Result<Option<u64>, ()> {
     if let Some(data) = crate::ipc::kernel_recv(channel_id) {
@@ -60,6 +65,10 @@ pub extern "C" fn syscall_dispatch(n: u64, a1: u64, a2: u64, a3: u64) -> u64 {
             }
         }
         SYS_IPC_SEND => {
+            if !is_valid_channel_id(a1 as u32) {
+                return E_ERROR;
+            }
+
             // SAFETY: ABI input buffer from userspace.
             let buf = unsafe { core::slice::from_raw_parts(a2 as *const u8, a3 as usize) };
             if crate::ipc::kernel_send(a1 as u32, buf).is_ok() {
@@ -70,6 +79,11 @@ pub extern "C" fn syscall_dispatch(n: u64, a1: u64, a2: u64, a3: u64) -> u64 {
         }
         SYS_IPC_RECV => {
             let chan_id = a1 as u32;
+
+            if !is_valid_channel_id(chan_id) {
+                return E_ERROR;
+            }
+
             let out_ptr = a2 as *mut u8;
             let out_cap = a3 as usize;
 
@@ -84,6 +98,11 @@ pub extern "C" fn syscall_dispatch(n: u64, a1: u64, a2: u64, a3: u64) -> u64 {
         }
         SYS_IPC_RECV_NONBLOCKING => {
             let chan_id = a1 as u32;
+
+            if !is_valid_channel_id(chan_id) {
+                return E_ERROR;
+            }
+
             let out_ptr = a2 as *mut u8;
             let out_cap = a3 as usize;
 
@@ -94,7 +113,13 @@ pub extern "C" fn syscall_dispatch(n: u64, a1: u64, a2: u64, a3: u64) -> u64 {
             }
         }
         SYS_BLOCK_ON_CHAN => {
-            crate::task::block_current_on_channel(a1 as u32);
+            let chan_id = a1 as u32;
+
+            if !is_valid_channel_id(chan_id) {
+                return E_ERROR;
+            }
+
+            crate::task::block_current_on_channel(chan_id);
             SUCCESS
         }
         SYS_TIME => {
@@ -138,17 +163,17 @@ pub extern "C" fn syscall_dispatch(n: u64, a1: u64, a2: u64, a3: u64) -> u64 {
                 return E_ERROR;
             }
 
+            if crate::arch::dma::set_dma_buffer_len(dma_handle, packet_len).is_err() {
+                return E_ERROR;
+            }
+
             if let Some(buf_ptr) = crate::arch::dma::get_dma_buffer_ptr(dma_handle) {
-                // SAFETY: DMA ptr is managed by kernel and packet_len <= out_cap.
+                // SAFETY: DMA ptr is managed by kernel and set_dma_buffer_len validated packet_len.
                 unsafe {
                     core::ptr::copy_nonoverlapping(simulated_packet.as_ptr(), buf_ptr, packet_len);
                 }
 
-                if crate::arch::dma::set_dma_buffer_len(dma_handle, packet_len).is_ok() {
-                    packet_len as u64
-                } else {
-                    E_ERROR
-                }
+                packet_len as u64
             } else {
                 E_ERROR
             }
