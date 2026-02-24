@@ -457,6 +457,6 @@ YAML‑based V‑Node definitions
 
 This is the foundation of a real operating system.
 
-## Additional V-Node Specs
+## VFS V-Node Documentation
 
-- [File Manager V-Node (`svc://file-manager`)](FILE_MANAGER_VNODE.md)
+Detailed IPC contract and usage examples for `svc://vfs` are available at `docs/VFS_VNODE.md`.
