@@ -3,9 +3,10 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
+
 use crate::ipc::{IpcRecv, IpcSend};
 use crate::syscall::{
-    syscall2, syscall3, SYS_BLOCK_ON_CHAN, SYS_IPC_RECV, SYS_IPC_RECV_NONBLOCKING, SYS_IPC_SEND,
+    syscall3, E_ERROR, SUCCESS, SYS_IPC_RECV, SYS_IPC_RECV_NONBLOCKING, SYS_IPC_SEND,
 };
 
 pub struct VNodeChannel {
@@ -31,14 +32,20 @@ impl VNodeChannel {
                     self.buffer.len() as u64,
                 )
             };
-            if len > 0 {
-                return Ok(self.buffer[..len as usize].to_vec());
-            } else if len == 0 {
-                unsafe {
-                    syscall2(SYS_BLOCK_ON_CHAN, self.id as u64, 0);
+
+            match len {
+                l if l > SUCCESS => {
+                    return Ok(self.buffer[..l as usize].to_vec());
                 }
-            } else {
-                return Err(());
+                SUCCESS => {
+                    // Kernel has blocked and re-scheduled us; retry once resumed.
+                }
+                E_ERROR => {
+                    return Err(());
+                }
+                _ => {
+                    return Err(());
+                }
             }
         }
     }
@@ -52,33 +59,24 @@ impl VNodeChannel {
                 self.buffer.len() as u64,
             )
         };
-        if len > 0 {
-            Ok(Some(self.buffer[..len as usize].to_vec()))
-        } else if len == 0 {
-            Ok(None)
-        } else {
-            Err(())
+
+        match len {
+            l if l > SUCCESS => Ok(Some(self.buffer[..l as usize].to_vec())),
+            SUCCESS => Ok(None),
+            E_ERROR => Err(()),
+            _ => Err(()),
         }
     }
 
-
-    pub fn send_and_recv<Req: serde::Serialize, Res: serde::de::DeserializeOwned>(
+    pub fn send_and_recv<Req: serde::Serialize, Resp: serde::de::DeserializeOwned>(
         &mut self,
         request: &Req,
-    ) -> Result<Res, ()> {
-        let encoded = postcard::to_allocvec(request).map_err(|_| ())?;
-        self.send_raw(&encoded)?;
+    ) -> Result<Resp, ()> {
+        let serialized_request = postcard::to_allocvec(request).map_err(|_| ())?;
+        self.send_raw(&serialized_request)?;
 
-        loop {
-            match self.recv_non_blocking()? {
-                Some(data) => return postcard::from_bytes(&data).map_err(|_| ()),
-                None => {
-                    unsafe {
-                        syscall2(SYS_BLOCK_ON_CHAN, self.id as u64, 0);
-                    }
-                }
-            }
-        }
+        let response = self.recv_blocking()?;
+        postcard::from_bytes(&response).map_err(|_| ())
     }
 }
 
@@ -91,7 +89,7 @@ impl IpcSend for VNodeChannel {
                 bytes.as_ptr() as u64,
                 bytes.len() as u64,
             );
-            if res == crate::syscall::SUCCESS {
+            if res == SUCCESS {
                 Ok(())
             } else {
                 Err(())
