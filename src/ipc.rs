@@ -10,6 +10,7 @@ extern crate alloc;
 
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
+use spin::Mutex;
 
 use crate::kernel::config::IPC_CHANNEL_COUNT;
 use crate::kernel::error::{KernelError, Result};
@@ -31,22 +32,22 @@ pub trait IpcRecv {
 /// Message queue for a single IPC channel.
 pub type MessageQueue = VecDeque<Vec<u8>>;
 
-/// Global IPC channel storage.
-static mut CHANNELS: Option<Vec<MessageQueue>> = None;
+/// Maximum IPC message payload size (16 KiB).
+const MAX_IPC_MESSAGE_SIZE: usize = 16 * 1024;
 
-fn channels_mut() -> &'static mut Vec<MessageQueue> {
-    // SAFETY: This kernel prototype currently runs single-threaded in tests/simulation.
-    unsafe {
-        if CHANNELS.is_none() {
-            let mut channels = Vec::with_capacity(IPC_CHANNEL_COUNT as usize);
-            for _ in 0..IPC_CHANNEL_COUNT {
-                channels.push(VecDeque::new());
-            }
-            CHANNELS = Some(channels);
+/// Global IPC channel storage protected by a spinlock.
+static CHANNELS: Mutex<Option<Vec<MessageQueue>>> = Mutex::new(None);
+
+fn with_channels<R>(f: impl FnOnce(&mut Vec<MessageQueue>) -> R) -> R {
+    let mut guard = CHANNELS.lock();
+    let channels = guard.get_or_insert_with(|| {
+        let mut channels = Vec::with_capacity(IPC_CHANNEL_COUNT as usize);
+        for _ in 0..IPC_CHANNEL_COUNT {
+            channels.push(VecDeque::new());
         }
-
-        CHANNELS.as_mut().expect("CHANNELS must be initialized")
-    }
+        channels
+    });
+    f(channels)
 }
 
 /// Sends a message through an IPC channel.
@@ -58,7 +59,11 @@ pub fn kernel_send(channel_id: u32, data: &[u8]) -> Result<()> {
         return Err(KernelError::InvalidChannelId(channel_id));
     }
 
-    channels_mut()[channel_id as usize].push_back(data.to_vec());
+    if data.len() > MAX_IPC_MESSAGE_SIZE {
+        return Err(KernelError::InvalidArgument("Message too large"));
+    }
+
+    with_channels(|channels| channels[channel_id as usize].push_back(data.to_vec()));
     Ok(())
 }
 
@@ -71,7 +76,7 @@ pub fn kernel_recv(channel_id: u32) -> Result<Option<Vec<u8>>> {
         return Err(KernelError::InvalidChannelId(channel_id));
     }
 
-    Ok(channels_mut()[channel_id as usize].pop_front())
+    Ok(with_channels(|channels| channels[channel_id as usize].pop_front()))
 }
 
 /// Returns the number of queued messages on a channel.
@@ -83,7 +88,35 @@ pub fn channel_message_count(channel_id: u32) -> Result<usize> {
         return Err(KernelError::InvalidChannelId(channel_id));
     }
 
-    Ok(channels_mut()[channel_id as usize].len())
+    Ok(with_channels(|channels| channels[channel_id as usize].len()))
+}
+
+/// Initializes a channel explicitly.
+///
+/// This is idempotent and primarily useful to validate a channel ID.
+///
+/// # Errors
+/// Returns [`KernelError::InvalidChannelId`] if `channel_id >= IPC_CHANNEL_COUNT`.
+pub fn init_channel(channel_id: u32) -> Result<()> {
+    if channel_id >= IPC_CHANNEL_COUNT {
+        return Err(KernelError::InvalidChannelId(channel_id));
+    }
+
+    with_channels(|_| ());
+    Ok(())
+}
+
+/// Clears all queued messages from a channel.
+///
+/// # Errors
+/// Returns [`KernelError::InvalidChannelId`] if `channel_id >= IPC_CHANNEL_COUNT`.
+pub fn clear_channel(channel_id: u32) -> Result<()> {
+    if channel_id >= IPC_CHANNEL_COUNT {
+        return Err(KernelError::InvalidChannelId(channel_id));
+    }
+
+    with_channels(|channels| channels[channel_id as usize].clear());
+    Ok(())
 }
 
 #[cfg(test)]
@@ -92,6 +125,7 @@ mod tests {
 
     #[test]
     fn test_send_recv_basic() {
+        clear_channel(1).unwrap();
         let data = b"test message";
         kernel_send(1, data).unwrap();
 
@@ -108,6 +142,7 @@ mod tests {
 
     #[test]
     fn test_empty_channel() {
+        clear_channel(5).unwrap();
         let received = kernel_recv(5).unwrap();
         assert_eq!(received, None);
     }
@@ -115,11 +150,29 @@ mod tests {
     #[test]
     fn test_channel_message_count() {
         let channel = 6;
+        clear_channel(channel).unwrap();
         assert_eq!(channel_message_count(channel).unwrap(), 0);
         kernel_send(channel, b"one").unwrap();
         kernel_send(channel, b"two").unwrap();
         assert_eq!(channel_message_count(channel).unwrap(), 2);
         let _ = kernel_recv(channel).unwrap();
         assert_eq!(channel_message_count(channel).unwrap(), 1);
+    }
+
+    #[test]
+    fn test_large_message_rejected() {
+        clear_channel(7).unwrap();
+        let too_large = alloc::vec![0_u8; MAX_IPC_MESSAGE_SIZE + 1];
+        let result = kernel_send(7, &too_large);
+        assert_eq!(result, Err(KernelError::InvalidArgument("Message too large")));
+    }
+
+    #[test]
+    fn test_clear_channel() {
+        clear_channel(8).unwrap();
+        kernel_send(8, b"hello").unwrap();
+        assert_eq!(channel_message_count(8).unwrap(), 1);
+        clear_channel(8).unwrap();
+        assert_eq!(channel_message_count(8).unwrap(), 0);
     }
 }
