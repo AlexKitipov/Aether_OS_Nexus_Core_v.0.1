@@ -17,23 +17,40 @@ pub const SYS_IRQ_ACK: u64 = 10;
 pub const SYS_GET_DMA_BUF_PTR: u64 = 11;
 pub const SYS_SET_DMA_BUF_LEN: u64 = 12;
 pub const SYS_IPC_RECV_NONBLOCKING: u64 = 13;
-const IPC_CHANNEL_COUNT: u32 = 32;
-
-fn is_valid_channel_id(id: u32) -> bool {
-    id < IPC_CHANNEL_COUNT
+/// Strongly typed syscall-side errors for IPC validation and copy operations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KernelError {
+    /// The provided IPC channel id is outside the configured channel range.
+    InvalidChannelId(u32),
+    /// The output buffer is too small for the received message.
+    BufferTooSmall { required: usize, provided: usize },
 }
 
-fn try_recv_into_buffer(channel_id: u32, out_ptr: *mut u8, out_cap: usize) -> Result<Option<u64>, ()> {
+fn is_valid_channel_id(id: u32) -> bool {
+    id < crate::kernel::config::IPC_CHANNEL_COUNT
+}
+
+/// Receives and copies one IPC message into a caller-provided ABI buffer.
+///
+/// # Safety
+/// The caller must guarantee that `out_ptr` is writable for `out_cap` bytes.
+unsafe fn try_recv_into_buffer(
+    channel_id: u32,
+    out_ptr: *mut u8,
+    out_cap: usize,
+) -> Result<Option<u64>, KernelError> {
     if let Some(data) = crate::ipc::kernel_recv(channel_id) {
         if data.len() > out_cap {
-            return Err(());
+            return Err(KernelError::BufferTooSmall {
+                required: data.len(),
+                provided: out_cap,
+            });
         }
 
-        // SAFETY: The caller owns `out_ptr` and guarantees writable memory of size `out_cap`.
+        // SAFETY: Caller guarantees `out_ptr` points to writable memory for `out_cap` bytes.
         unsafe {
             core::ptr::copy_nonoverlapping(data.as_ptr(), out_ptr, data.len());
         }
-
         Ok(Some(data.len() as u64))
     } else {
         Ok(None)
@@ -87,13 +104,14 @@ pub extern "C" fn syscall_dispatch(n: u64, a1: u64, a2: u64, a3: u64) -> u64 {
             let out_ptr = a2 as *mut u8;
             let out_cap = a3 as usize;
 
-            match try_recv_into_buffer(chan_id, out_ptr, out_cap) {
+            // SAFETY: userspace provides output pointer/capacity in syscall ABI.
+            match unsafe { try_recv_into_buffer(chan_id, out_ptr, out_cap) } {
                 Ok(Some(len)) => len,
                 Ok(None) => {
                     crate::task::block_current_on_channel(chan_id);
                     SUCCESS
                 }
-                Err(()) => E_ERROR,
+                Err(_) => E_ERROR,
             }
         }
         SYS_IPC_RECV_NONBLOCKING => {
@@ -106,10 +124,11 @@ pub extern "C" fn syscall_dispatch(n: u64, a1: u64, a2: u64, a3: u64) -> u64 {
             let out_ptr = a2 as *mut u8;
             let out_cap = a3 as usize;
 
-            match try_recv_into_buffer(chan_id, out_ptr, out_cap) {
+            // SAFETY: userspace provides output pointer/capacity in syscall ABI.
+            match unsafe { try_recv_into_buffer(chan_id, out_ptr, out_cap) } {
                 Ok(Some(len)) => len,
                 Ok(None) => SUCCESS,
-                Err(()) => E_ERROR,
+                Err(_) => E_ERROR,
             }
         }
         SYS_BLOCK_ON_CHAN => {
@@ -152,10 +171,9 @@ pub extern "C" fn syscall_dispatch(n: u64, a1: u64, a2: u64, a3: u64) -> u64 {
             let out_cap = a3 as usize;
 
             let simulated_packet: [u8; 42] = [
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x08,
-                0x06, 0x00, 0x01, 0x08, 0x00, 0x06, 0x04, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x01, 0xC0, 0xA8, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0,
-                0xA8, 0x01, 0x02,
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06,
+                0x00, 0x01, 0x08, 0x00, 0x06, 0x04, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+                0xC0, 0xA8, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0xA8, 0x01, 0x02,
             ];
             let packet_len = simulated_packet.len();
 
@@ -240,5 +258,32 @@ pub extern "C" fn syscall_dispatch(n: u64, a1: u64, a2: u64, a3: u64) -> u64 {
             }
         }
         _ => E_UNKNOWN_SYSCALL,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_channel_id_is_rejected() {
+        assert!(!is_valid_channel_id(
+            crate::kernel::config::IPC_CHANNEL_COUNT
+        ));
+    }
+
+    #[test]
+    fn kernel_error_keeps_buffer_sizes() {
+        let err = KernelError::BufferTooSmall {
+            required: 128,
+            provided: 64,
+        };
+        assert_eq!(
+            err,
+            KernelError::BufferTooSmall {
+                required: 128,
+                provided: 64
+            }
+        );
     }
 }
