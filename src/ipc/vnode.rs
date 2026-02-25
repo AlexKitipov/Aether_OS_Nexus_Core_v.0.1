@@ -60,6 +60,26 @@ impl VNodeChannel {
             Err(())
         }
     }
+
+
+    pub fn send_and_recv<Req: serde::Serialize, Res: serde::de::DeserializeOwned>(
+        &mut self,
+        request: &Req,
+    ) -> Result<Res, ()> {
+        let encoded = postcard::to_allocvec(request).map_err(|_| ())?;
+        self.send_raw(&encoded)?;
+
+        loop {
+            match self.recv_non_blocking()? {
+                Some(data) => return postcard::from_bytes(&data).map_err(|_| ()),
+                None => {
+                    unsafe {
+                        syscall2(SYS_BLOCK_ON_CHAN, self.id as u64, 0);
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl IpcSend for VNodeChannel {
