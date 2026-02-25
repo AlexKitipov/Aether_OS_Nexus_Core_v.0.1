@@ -17,17 +17,14 @@ pub const SYS_IRQ_ACK: u64 = 10;
 pub const SYS_GET_DMA_BUF_PTR: u64 = 11;
 pub const SYS_SET_DMA_BUF_LEN: u64 = 12;
 pub const SYS_IPC_RECV_NONBLOCKING: u64 = 13;
-/// Strongly typed syscall-side errors for IPC validation and copy operations.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum KernelError {
-    /// The provided IPC channel id is outside the configured channel range.
-    InvalidChannelId(u32),
-    /// The output buffer is too small for the received message.
-    BufferTooSmall { required: usize, provided: usize },
-}
+use crate::kernel::error::KernelError;
 
-fn is_valid_channel_id(id: u32) -> bool {
-    id < crate::kernel::config::IPC_CHANNEL_COUNT
+fn is_valid_channel_id(id: u32) -> Result<(), KernelError> {
+    if id < crate::kernel::config::IPC_CHANNEL_COUNT {
+        Ok(())
+    } else {
+        Err(KernelError::InvalidChannelId(id))
+    }
 }
 
 /// Receives and copies one IPC message into a caller-provided ABI buffer.
@@ -82,8 +79,8 @@ pub extern "C" fn syscall_dispatch(n: u64, a1: u64, a2: u64, a3: u64) -> u64 {
             }
         }
         SYS_IPC_SEND => {
-            if !is_valid_channel_id(a1 as u32) {
-                return E_ERROR;
+            if let Err(err) = is_valid_channel_id(a1 as u32) {
+                return err.to_syscall_code();
             }
 
             // SAFETY: ABI input buffer from userspace.
@@ -97,8 +94,8 @@ pub extern "C" fn syscall_dispatch(n: u64, a1: u64, a2: u64, a3: u64) -> u64 {
         SYS_IPC_RECV => {
             let chan_id = a1 as u32;
 
-            if !is_valid_channel_id(chan_id) {
-                return E_ERROR;
+            if let Err(err) = is_valid_channel_id(chan_id) {
+                return err.to_syscall_code();
             }
 
             let out_ptr = a2 as *mut u8;
@@ -111,14 +108,14 @@ pub extern "C" fn syscall_dispatch(n: u64, a1: u64, a2: u64, a3: u64) -> u64 {
                     crate::task::block_current_on_channel(chan_id);
                     SUCCESS
                 }
-                Err(_) => E_ERROR,
+                Err(err) => err.to_syscall_code(),
             }
         }
         SYS_IPC_RECV_NONBLOCKING => {
             let chan_id = a1 as u32;
 
-            if !is_valid_channel_id(chan_id) {
-                return E_ERROR;
+            if let Err(err) = is_valid_channel_id(chan_id) {
+                return err.to_syscall_code();
             }
 
             let out_ptr = a2 as *mut u8;
@@ -128,14 +125,14 @@ pub extern "C" fn syscall_dispatch(n: u64, a1: u64, a2: u64, a3: u64) -> u64 {
             match unsafe { try_recv_into_buffer(chan_id, out_ptr, out_cap) } {
                 Ok(Some(len)) => len,
                 Ok(None) => SUCCESS,
-                Err(_) => E_ERROR,
+                Err(err) => err.to_syscall_code(),
             }
         }
         SYS_BLOCK_ON_CHAN => {
             let chan_id = a1 as u32;
 
-            if !is_valid_channel_id(chan_id) {
-                return E_ERROR;
+            if let Err(err) = is_valid_channel_id(chan_id) {
+                return err.to_syscall_code();
             }
 
             crate::task::block_current_on_channel(chan_id);
@@ -266,10 +263,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn invalid_channel_id_is_rejected() {
-        assert!(!is_valid_channel_id(
-            crate::kernel::config::IPC_CHANNEL_COUNT
-        ));
+    fn test_invalid_channel_id() {
+        assert!(is_valid_channel_id(crate::kernel::config::IPC_CHANNEL_COUNT).is_err());
     }
 
     #[test]
@@ -285,5 +280,16 @@ mod tests {
                 provided: 64
             }
         );
+    }
+
+    #[test]
+    fn test_ipc_send_recv_round_trip() {
+        let channel_id = 1;
+        let test_data = b"hello";
+
+        crate::ipc::kernel_send(channel_id, test_data).expect("send should succeed");
+        let received = crate::ipc::kernel_recv(channel_id).expect("message should be available");
+
+        assert_eq!(received.as_slice(), test_data);
     }
 }
