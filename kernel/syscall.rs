@@ -36,7 +36,7 @@ unsafe fn try_recv_into_buffer(
     out_ptr: *mut u8,
     out_cap: usize,
 ) -> Result<Option<u64>, KernelError> {
-    if let Some(data) = crate::ipc::kernel_recv(channel_id) {
+    if let Some(data) = crate::ipc::kernel_recv(channel_id)? {
         if data.len() > out_cap {
             return Err(KernelError::BufferTooSmall {
                 required: data.len(),
@@ -288,7 +288,9 @@ mod tests {
         let test_data = b"hello";
 
         crate::ipc::kernel_send(channel_id, test_data).expect("send should succeed");
-        let received = crate::ipc::kernel_recv(channel_id).expect("message should be available");
+        let received = crate::ipc::kernel_recv(channel_id)
+            .expect("recv should succeed")
+            .expect("message should be available");
 
         assert_eq!(received.as_slice(), test_data);
     }
