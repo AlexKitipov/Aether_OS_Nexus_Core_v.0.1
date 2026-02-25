@@ -7,7 +7,7 @@ fn test_vnode_ipc_communication() {
 
     kernel_send(channel_id, test_msg.as_bytes()).expect("send failed");
 
-    match kernel_recv(channel_id) {
+    match kernel_recv(channel_id).expect("recv failed") {
         Some(data) => {
             let received = String::from_utf8(data).expect("invalid utf8");
             assert_eq!(received, test_msg);
