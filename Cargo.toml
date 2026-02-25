@@ -6,6 +6,8 @@ edition = "2021"
 [dependencies]
 common = { path = "../common" }
 spin = "0.9"
+lazy_static = { version = "1.5", features = ["spin_no_std"] }
+uart_16550 = "0.3"
 
 [profile.dev]
 panic = "abort"
