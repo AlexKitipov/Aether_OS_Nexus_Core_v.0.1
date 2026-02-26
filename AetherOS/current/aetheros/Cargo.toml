@@ -1,0 +1,21 @@
+[workspace]
+members = [
+    "kernel",
+    "common",
+    "vnode/dns-resolver",
+    "vnode/file-manager",
+    "vnode/init-service",
+    "vnode/mail-service",
+    "vnode/model-runtime",
+    "vnode/net-bridge",
+    "vnode/net-stack",
+    "vnode/registry",
+    "vnode/shell",
+    "vnode/socket-api",
+    "vnode/vfs",
+]
+
+[profile.release]
+opt-level = 'z'
+lto = true
+codegen-units = 1
