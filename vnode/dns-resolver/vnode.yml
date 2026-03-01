@@ -10,7 +10,7 @@ runtime:
   max_cpu_share: 0.02 # Primarily forwards requests and processes UDP packets
 
 capabilities:
-  - CAP_IPC_CONNECT: "svc://socket-api" # To communicate with the Socket API V-Node for UDP client functionality
+  - CAP_IPC_CONNECT: "svc://aethernet" # To communicate with the Aethernet networking service for UDP client functionality
   - CAP_IPC_ACCEPT # To accept DNS queries from client V-Nodes
   - CAP_IPC_CONNECT: "svc://aetherfs" # To read /etc/network/resolv.conf
   - CAP_TIME_READ # For cache TTL management
