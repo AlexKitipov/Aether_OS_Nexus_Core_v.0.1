@@ -6,7 +6,14 @@ use alloc::string::String;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ipc::vfs_ipc::VfsMetadata; // Reusing VfsMetadata
+/// Metadata describing a filesystem entry.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VfsMetadata {
+    /// Size of the entry in bytes.
+    pub size: u64,
+    /// Whether the entry is a directory.
+    pub is_directory: bool,
+}
 
 /// Represents requests from client V-Nodes to the File Manager V-Node.
 #[derive(Debug, Serialize, Deserialize)]
